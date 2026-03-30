@@ -1,71 +1,102 @@
-name: Spring Boot CI/CD
+name: CI/CD - Build, Test & Deploy
 
 on:
   push:
-    branches:
-      - main
-      - develop
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
-      - develop
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven
+  JAVA_VERSION: '17'
+  CONTAINER_NAME: spring-maven-app
+  APP_PORT: '8080'
 
 jobs:
-  build:
-    name: Build & Test Spring Boot
+  test:
+    name: Tests Maven
     runs-on: ubuntu-latest
 
     steps:
-      # Récupération du code
-      - name: Checkout repository
+      - name: Checkout du code
         uses: actions/checkout@v4
 
-      # Installation de Java
-      - name: Set up JDK 17
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
           cache: maven
 
-      # Build & tests Maven
-      - name: Build with Maven
-        run: mvn clean verify
+      - name: Execution des tests
+        run: mvn test -B --no-transfer-progress
 
-      # Upload du JAR comme artefact
-      - name: Upload JAR artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: springboot-jar
-          path: target/*.jar
-
-  docker:
-    name: Build Docker Image
+  build-and-push:
+    name: Build & Push Docker
     runs-on: ubuntu-latest
-    needs: build
+    needs: test
     if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout repository
+      - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: Download JAR artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: springboot-jar
-          path: target
-
-      - name: Build Docker image
-        run: docker build -t springboot-app:latest .
-
-      - name: Login to Docker Hub
+      - name: Connexion a Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & Push Docker image
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/springboot-app:latest .
-          docker push ${{ secrets.DOCKER_USERNAME }}/springboot-app:latest
+      - name: Generation des metadonnees
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest
 
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & Push de l'image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploiement Production
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Deploiement via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+          script: |
+            echo '${{ secrets.DOCKERHUB_TOKEN }}' | docker login -u '${{ secrets.DOCKERHUB_USERNAME }}' --password-stdin
+            docker stop ${{ env.CONTAINER_NAME }} 2>/dev/null || true
+            docker rm ${{ env.CONTAINER_NAME }} 2>/dev/null || true
+            docker pull ${{ env.DOCKER_IMAGE }}:latest
+            docker run -d \
+              --name ${{ env.CONTAINER_NAME }} \
+              --restart unless-stopped \
+              -p ${{ env.APP_PORT }}:8080 \
+              -e SPRING_PROFILES_ACTIVE=prod \
+              ${{ env.DOCKER_IMAGE }}:latest
+            docker image prune -f
+            sleep 15
+            docker ps | grep ${{ env.CONTAINER_NAME }}
+            echo 'Deploiement reussi !'
