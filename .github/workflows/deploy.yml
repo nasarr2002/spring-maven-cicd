@@ -11,6 +11,7 @@ env:
   DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven
   JAVA_VERSION: '17'
   CONTAINER_NAME: spring-maven-app
+  BACKUP_CONTAINER_NAME: spring-maven-app-backup
   APP_PORT: '8080'
 
 jobs:
@@ -101,32 +102,60 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Arret ancien conteneur
-        run: |
-          docker stop spring-maven-app || true
-          docker rm spring-maven-app || true
-
       - name: Pull image Docker
         run: docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven:latest
 
-      - name: Demarrage nouveau conteneur
+      - name: Deploiement avec rollback
+        shell: bash
         run: |
+          set -e
+
+          # Nettoyage d'une ancienne sauvegarde si elle existe
+          docker rm -f $BACKUP_CONTAINER_NAME 2>/dev/null || true
+
+          # Si le conteneur actif existe, on le renomme comme sauvegarde
+          if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
+            docker stop $CONTAINER_NAME || true
+            docker rename $CONTAINER_NAME $BACKUP_CONTAINER_NAME
+          fi
+
+          # Lancer le nouveau conteneur
           docker run -d \
-            --name spring-maven-app \
+            --name $CONTAINER_NAME \
             --restart unless-stopped \
-            -p 8080:8080 \
+            -p $APP_PORT:8080 \
             -e SPRING_PROFILES_ACTIVE=prod \
             ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven:latest
 
-      - name: Verification
-        run: |
+          # Vérification applicative
+          success=0
           for i in {1..12}; do
-            if curl -fsS http://localhost:8080/; then
-              exit 0
+            if curl -fsS http://localhost:8080/ > /dev/null; then
+              success=1
+              break
             fi
             sleep 5
           done
-          echo "L'application n'a pas repondu a temps"
-          docker ps
-          docker logs spring-maven-app || true
+
+          # Si succès: on supprime la sauvegarde
+          if [ "$success" -eq 1 ]; then
+            echo "Deploiement reussi"
+            docker rm -f $BACKUP_CONTAINER_NAME 2>/dev/null || true
+            docker image prune -f
+            exit 0
+          fi
+
+          # Sinon: rollback
+          echo "Echec du nouveau deploiement, rollback en cours"
+          docker logs $CONTAINER_NAME || true
+          docker rm -f $CONTAINER_NAME || true
+
+          if docker ps -a --format '{{.Names}}' | grep -q "^$BACKUP_CONTAINER_NAME$"; then
+            docker rename $BACKUP_CONTAINER_NAME $CONTAINER_NAME
+            docker start $CONTAINER_NAME
+            echo "Rollback effectue avec succes"
+            exit 1
+          fi
+
+          echo "Aucun conteneur precedent disponible pour rollback"
           exit 1
