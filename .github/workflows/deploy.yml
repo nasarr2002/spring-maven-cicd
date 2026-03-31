@@ -71,38 +71,38 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-deploy:
-  name: Deploiement Production
-  runs-on: self-hosted
-  needs: build-and-push
-  if: github.ref == 'refs/heads/main'
+  deploy:
+    name: Deploiement Production
+    runs-on: self-hosted
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
 
-  steps:
-    - name: Connexion a Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    steps:
+      - name: Connexion a Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Arret ancien conteneur
-      run: |
-        docker stop spring-maven-app || true
-        docker rm spring-maven-app || true
+      - name: Arret ancien conteneur
+        run: |
+          docker stop spring-maven-app || true
+          docker rm spring-maven-app || true
 
-    - name: Pull image Docker
-      run: docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven:latest
+      - name: Pull image Docker
+        run: docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven:latest
 
-    - name: Demarrage nouveau conteneur
-      run: |
-        docker run -d \
-          --name spring-maven-app \
-          --restart unless-stopped \
-          -p 8080:8080 \
-          -e SPRING_PROFILES_ACTIVE=prod \
-          ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven:latest
+      - name: Demarrage nouveau conteneur
+        run: |
+          docker run -d \
+            --name spring-maven-app \
+            --restart unless-stopped \
+            -p 8080:8080 \
+            -e SPRING_PROFILES_ACTIVE=prod \
+            ${{ secrets.DOCKERHUB_USERNAME }}/spring-maven:latest
 
-    - name: Verification
-      run: |
-        sleep 10
-        docker ps
-        curl http://localhost:8080/
+      - name: Verification
+        run: |
+          sleep 10
+          docker ps
+          curl http://localhost:8080/
