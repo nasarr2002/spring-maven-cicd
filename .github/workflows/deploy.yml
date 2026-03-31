@@ -71,7 +71,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-   security-scan:
+  security-scan:
     name: Scan securite Trivy
     runs-on: ubuntu-latest
     needs: build-and-push
