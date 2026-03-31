@@ -130,7 +130,7 @@ jobs:
           # Vérification applicative
           success=0
           for i in {1..12}; do
-            if curl -fsS http://localhost:8080/ > /dev/null; then
+            if curl -fsS http://localhost:9999/ > /dev/null; then
               success=1
               break
             fi
