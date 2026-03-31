@@ -103,6 +103,13 @@ jobs:
 
       - name: Verification
         run: |
-          sleep 10
+          for i in {1..12}; do
+            if curl -fsS http://localhost:8080/; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "L'application n'a pas repondu a temps"
           docker ps
-          curl http://localhost:8080/
+          docker logs spring-maven-app || true
+          exit 1
