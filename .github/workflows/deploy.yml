@@ -130,7 +130,7 @@ jobs:
           # Vérification applicative
           success=0
           for i in {1..12}; do
-            if curl -fsS http://localhost:9999/ > /dev/null; then
+            if curl -fsS http://localhost:8080/ > /dev/null; then
               success=1
               break
             fi
@@ -168,9 +168,13 @@ jobs:
 
     steps:
       - name: Envoyer un email d'echec
-        uses: action-pack/send-mail@v1
+        uses: dawidd6/action-send-mail@v3
         with:
-          connection_url: ${{ secrets.MAIL_CONNECTION }}
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
           subject: "[ECHEC CI/CD] spring-maven-cicd"
           to: ${{ secrets.EMAIL_TO }}
           from: ${{ secrets.EMAIL_FROM }}
